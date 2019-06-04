@@ -14,25 +14,37 @@ options(stringsAsFactors = F)
 ```{r Libraries}
 library(googlesheets)
 library(gdata)
+library(nlme)
+source('functions.r')
 ```
 
 
 ```{r Data}
 lemna.aug <- read.csv('Data/Growth/ImageAnalysis/Pieter_SwedenSite_August2018.csv', sep = ';', dec = ',')
-lemna.sep <- read.csv('Data/Growth/ImageAnalysis/Nordborg_Pieter_SwedenSite_September2018.csv', sep = ';', dec = ',')
+lemna.sep <- read.csv('Data/Growth/ImageAnalysis/Nordborg_Pieter_SwedenSite_Sept2018_COMPLETE.csv', sep = ';', dec = ',')
 # get meta information on each position
 potInfo.gs <- gs_key("11ttBZsMiamn4zEDHUNT-L8CsK4EoAwtbSSUjTs5YEj8")
 potInfo <- as.data.frame(gs_read(potInfo.gs, ws = 'Randomisation'))
 # get px/mm2 scael for each picture
 distance.xls <- read.xls('Data/Growth/distanceCalibration.xlsx')
+emptyPots <- read.table('Data/Growth/emptyPots.txt', head = T)
 ```
+emptyPots are pots that did not contain a plant on the respective date that the picture was taken as seen on the respective pictures.
+The empty pots resemble both pots left empty on purpose, plants that died, plants that were harvested.
 
 ```{r General Variables}
 design <-data.frame('TrayNumber' = seq(1,36), 'Block' = c(rep('A', 12), rep('B', 12), rep('C', 12)), 'TrayBlockNr' = rep(seq(1,12), 3))
 design$Tray <- paste(design$Block, design$TrayBlockNr, sep = '')
-
-dates <- unique(distance.xls$date)
 trays <- design$Tray
+
+dates <- data.frame('date' = c(26082018, 17092018, 16102018, 13112018, 19042019), 'month' = factor(c('aug', 'sep', 'oct', 'nov', 'apr'), levels = c('aug', 'sep', 'oct', 'nov', 'apr'), ordered = T), 'year' = c(2018, 2018, 2018, 2018, 2019))
+time0 <- strptime(26082018, format = "%d%m%Y")
+dates$days <- unlist(lapply(dates$date, function(date)
+  {
+    date <- strptime(date, format = "%d%m%Y")
+    timepoint <- round(as.numeric(difftime(date, time0, units = 'days')))
+    return(timepoint)
+    }))
 
 # marker used as reference is 14.1cm
 marker <- 14.1
@@ -42,9 +54,14 @@ marker <- 14.1
 ```{r Prepare data}
 # combine data
 lemna <- rbind(lemna.aug, lemna.sep)
-#LinkhesoIDs to positions
-lemna <- lemna[ ,c('ROI.Label', 'Snapshot.ID.Tag', 'Area', 'Caliper.Length', 'Circumference', 'Compactness')]
-
+lemna <- lemna[ ,c('ROI.Label', 'Snapshot.ID.Tag', 'ROI.Object.Sum.Area', 'Caliper.Length', 'Circumference', 'Compactness')]
+lemna$pot <- unlist(lapply(lemna$ROI.Label, function(ROI)
+  {
+    row <- tolower(substr(ROI, 1, 1))
+    col <- as.numeric(substr(ROI, 2, 3))
+    pot <- paste(row, col, sep = '')
+    return(pot)
+  }))
 # Snapshot.ID.Tag contains date and tray number
 lemna$Tray <- unlist(lapply(lemna$Snapshot.ID.Tag, function(ID)
   {
@@ -52,8 +69,25 @@ lemna$Tray <- unlist(lapply(lemna$Snapshot.ID.Tag, function(ID)
     tray <- design$Tray[design$TrayNumber == trayNr]
     return(tray)
   }))
-
+lemna$block <- unlist(lapply(lemna$Tray, function(tray){substr(tray,1,1)}))
+lemna$position <- paste(lemna$Tray, lemna$pot, sep = '_')
+lemna$ID <- paste(lemna$Snapshot.ID.Tag, lemna$pot, sep = '_')
 lemna$date <- unlist(lapply(lemna$Snapshot.ID.Tag, function(ID){strsplit(ID, split = '_')[[1]][2]}))
+lemna$month <- dates$month[match(lemna$date, dates$date)]
+
+# multiple ROI.objects. Take only first measurement and only ROI.Object.Sum.Area
+objectCount <- table(lemna$ID)
+IDmulti <- names(objectCount[objectCount > 1])
+
+for (ID in IDmulti)
+{
+  ID.objectCnt <- objectCount[ID]
+  lemna$ROI.Object.Sum.Area[lemna$ID == ID][2:ID.objectCnt] <- NA
+}
+# remove multiple ROI.objects
+lemna <- lemna[!is.na(lemna$ROI.Object.Sum.Area), ]
+
+
 
 # ROI.Label is the plant identifier
 
@@ -70,34 +104,64 @@ for (i in 1:nrow(distance.xls))
   date <- distance.xls$date[i]
   pxls <- distance.xls$pixels[i]
   cms <- distance.xls$cm[i]
-  conversion <- cms^2/pxls
+  conversion <- (cms/pxls)^2
   # for august the converison rates of the composite images (merge of two pictures of half a tray)
-  if (date == '26082018' & grepl('DSC', distance.xls$original.file)){next()}
+  if (date == '26082018' & grepl('DSC', distance.xls$original.file[i])){next()}
   
   convDF <- data.frame('Date' = rep(date, length(tray)), 'Tray' = tray, 'Columns' = rep(columns, length(tray)), 'Conversion' = rep(conversion, length(tray)))
   conversionRates <- rbind(conversionRates, convDF)
 }
 
 # convert pixels to mm2
-lemna$AreaCm <- apply(lemna, dim = 1, FUN = convertPxlToCm2, conversionRates = conversionRates)
+lemna$AreaCm <- apply(lemna, MARGIN = 1, FUN = convertPxlToCm2, conversionRates = conversionRates)
+```
 
-# TEMP function
-convertPxlToCm2 <- function(lemnaRow, conversionRates = conversionRates)
+Plants were harvested every month.
+Remove positions that were empty in the taken pictures.
+(starting from October)
+```{r remove empty pots}
+emptyPots$Pot <- unlist(lapply(emptyPots$Pot, function(pot)
 {
-  tray <- lemnaRow$Tray
-  startCol <- NA
-  endCol <- NA
-  date <- lemnaRow$date
-  pxlToCm2 <- conversionRates$Conversion[conversionRates$Tray == tray & conversionRates$Date == date]
-  
-  
-  
-}
+  row <- substr(pot, 1,1)
+  col <- substr(pot, 2, nchar(pot))
+  col <- formatC(as.numeric(col), width = 2, flag = '0')
+  return(paste(row, col, sep = ''))
+}))
 
+for (i in 1:nrow(emptyPots))
+{
+  date <- emptyPots$Date[i]
+  tray <- emptyPots$Tray[i]
+  pot <- emptyPots$Pot[i]
+  lemna$pot[lemna$Tray == tray & lemna$date == date & lemna$pot == pot] <- NA
+}
+lemna <- lemna[!is.na(lemna$pot), ]
+```
+
+```{r annotate accessions}
+lemna$accession <- potInfo$acn[match(lemna$position, potInfo$ID)]
+```
+
+
+```{r correct for block effects}
+# get timepoints as days
+lemna$days <- dates$days[match(lemna$date, dates$date)]
+
+# model with time as numeric
+lmm.time <- lme(AreaCm ~ accession*days, random = ~ 1 + days|block/position, data = lemna)
+
+# model with time as factor (months)
+
+# correct for heteroscedascity???
 
 ```
-For september, data and pictures of tray 2 and 3 are missing.
-Anna, will fix this
+
+```{r estimated marginal means}
+
+```
+
+
+
 
 
 
