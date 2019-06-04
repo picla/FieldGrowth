@@ -151,7 +151,7 @@ lemna$days <- dates$days[match(lemna$date, dates$date)]
 lmm.time <- lme(AreaCm ~ accession*days, random = ~ 1 + days|block/position, data = lemna)
 
 # model with time as factor (months)
-
+lmm.month <- lme(AreaCm ~ accession*month, random = ~ 1 + month|block/position, data = lemna)
 # correct for heteroscedascity???
 
 ```
