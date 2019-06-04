@@ -1,0 +1,107 @@
+---
+title: "dataOverview"
+author: "Pieter Clauw"
+date: "03/06/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/FieldRNA/")
+options(stringsAsFactors = F)
+```
+
+```{r Libraries}
+library(googlesheets)
+library(gdata)
+```
+
+
+```{r Data}
+lemna.aug <- read.csv('Data/Growth/ImageAnalysis/Pieter_SwedenSite_August2018.csv', sep = ';', dec = ',')
+lemna.sep <- read.csv('Data/Growth/ImageAnalysis/Nordborg_Pieter_SwedenSite_September2018.csv', sep = ';', dec = ',')
+# get meta information on each position
+potInfo.gs <- gs_key("11ttBZsMiamn4zEDHUNT-L8CsK4EoAwtbSSUjTs5YEj8")
+potInfo <- as.data.frame(gs_read(potInfo.gs, ws = 'Randomisation'))
+# get px/mm2 scael for each picture
+distance.xls <- read.xls('Data/Growth/distanceCalibration.xlsx')
+```
+
+```{r General Variables}
+design <-data.frame('TrayNumber' = seq(1,36), 'Block' = c(rep('A', 12), rep('B', 12), rep('C', 12)), 'TrayBlockNr' = rep(seq(1,12), 3))
+design$Tray <- paste(design$Block, design$TrayBlockNr, sep = '')
+
+dates <- unique(distance.xls$date)
+trays <- design$Tray
+
+# marker used as reference is 14.1cm
+marker <- 14.1
+```
+
+
+```{r Prepare data}
+# combine data
+lemna <- rbind(lemna.aug, lemna.sep)
+#LinkhesoIDs to positions
+lemna <- lemna[ ,c('ROI.Label', 'Snapshot.ID.Tag', 'Area', 'Caliper.Length', 'Circumference', 'Compactness')]
+
+# Snapshot.ID.Tag contains date and tray number
+lemna$Tray <- unlist(lapply(lemna$Snapshot.ID.Tag, function(ID)
+  {
+    trayNr <- strsplit(ID, split = '_')[[1]][1]
+    tray <- design$Tray[design$TrayNumber == trayNr]
+    return(tray)
+  }))
+
+lemna$date <- unlist(lapply(lemna$Snapshot.ID.Tag, function(ID){strsplit(ID, split = '_')[[1]][2]}))
+
+# ROI.Label is the plant identifier
+
+# transform pixels to cm2
+# get conversion ratios per tray
+distance.xls$cm[distance.xls$cm == 'marker'] <- marker
+distance.xls$cm <- as.numeric(distance.xls$cm)
+conversionRates <- data.frame('Date' = integer(), 'Tray' = character(), 'Columns' = character(), 'Conversion' = numeric())
+for (i in 1:nrow(distance.xls))
+{
+  if (nchar(distance.xls$Trays[i]) < 1){next()}
+  tray <- trimws(strsplit(distance.xls$Trays[i], split = ';')[[1]])
+  columns <- distance.xls$columns[i]
+  date <- distance.xls$date[i]
+  pxls <- distance.xls$pixels[i]
+  cms <- distance.xls$cm[i]
+  conversion <- cms^2/pxls
+  # for august the converison rates of the composite images (merge of two pictures of half a tray)
+  if (date == '26082018' & grepl('DSC', distance.xls$original.file)){next()}
+  
+  convDF <- data.frame('Date' = rep(date, length(tray)), 'Tray' = tray, 'Columns' = rep(columns, length(tray)), 'Conversion' = rep(conversion, length(tray)))
+  conversionRates <- rbind(conversionRates, convDF)
+}
+
+# convert pixels to mm2
+lemna$AreaCm <- apply(lemna, dim = 1, FUN = convertPxlToCm2, conversionRates = conversionRates)
+
+# TEMP function
+convertPxlToCm2 <- function(lemnaRow, conversionRates = conversionRates)
+{
+  tray <- lemnaRow$Tray
+  startCol <- NA
+  endCol <- NA
+  date <- lemnaRow$date
+  pxlToCm2 <- conversionRates$Conversion[conversionRates$Tray == tray & conversionRates$Date == date]
+  
+  
+  
+}
+
+
+```
+For september, data and pictures of tray 2 and 3 are missing.
+Anna, will fix this
+
+
+
+
+
+
+
