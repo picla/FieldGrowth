@@ -169,18 +169,22 @@ lemna$days <- dates$days[match(lemna$date, dates$date)]
 plot(lemna$days, lemna$AreaMm, col = as.factor(lemna$accession))
 plot(lemna$days, lemna$logAreaMm, col = as.factor(lemna$accession))
 ```
-
+From teh plot it looks like for the logAreaMm, a polynomial model will be a better fit than a linear or quadratic model.
+Model with time as factor is much more heavy and does not give a better fit per se.
 
 
 ```{r correct for block effects}
 
 # model with time as numeric
-lmm.time <- lme(logAreaMm ~ accession*days, random = ~ 1 + days|block/position, data = lemna)
+lmm.time <- lme(logAreaMm ~ days*accession, random = ~ 1 + days|block/position, data = lemna)
+#lmm.polyTime <- lme(logAreaMm ~ (days + I(days^2) + I(days^3))*accession, random = ~ 1 + days|block/position, data = lemna)
+#lmm.polyTime <- lme(logAreaMm ~ (days + I(days^2))*accession, random = ~ 1 + days|block/position, data = lemna)
 
-# model with time as factor (months)
-lmm.month <- lme(logAreaMm ~ accession*month, random = ~ 1 + month|block/position, data = lemna)
 # correct for heteroscedascity???
 ```
+polynomial model requires one more timepoint than number of tested parameters.
+polynomial to the power 3 requires 4 timepoints. (Wait for november data).
+quadratic model does not converge.
 
 ```{r estimated marginal means}
 adjM <- emmeans(lmm.month, ~ month * accession)
