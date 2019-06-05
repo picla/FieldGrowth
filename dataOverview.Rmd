@@ -7,7 +7,6 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_knit$set(root.dir = "/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/FieldRNA/")
 options(stringsAsFactors = F)
 ```
 
@@ -15,19 +14,22 @@ options(stringsAsFactors = F)
 library(googlesheets)
 library(gdata)
 library(nlme)
+library(emmeans)
 source('functions.r')
 ```
 
 
 ```{r Data}
-lemna.aug <- read.csv('Data/Growth/ImageAnalysis/Pieter_SwedenSite_August2018.csv', sep = ';', dec = ',')
-lemna.sep <- read.csv('Data/Growth/ImageAnalysis/Nordborg_Pieter_SwedenSite_Sept2018_COMPLETE.csv', sep = ';', dec = ',')
+knitr::opts_knit$set(root.dir = "/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/FieldRNA/")
+lemna.aug <- read.csv('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/FieldRNA/Data/Growth/ImageAnalysis/Pieter_SwedenSite_August2018.csv', sep = ';', dec = ',')
+lemna.sep <- read.csv('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/FieldRNA/Data/Growth/ImageAnalysis/Nordborg_Pieter_SwedenSite_Sept2018_COMPLETE.csv', sep = ';', dec = ',')
+lemna.oct <- read.csv('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/FieldRNA/Data/Growth/ImageAnalysis/Nordborg_Pieter_SwedenSite_October2018.csv', sep = ';', dec = ',')
 # get meta information on each position
 potInfo.gs <- gs_key("11ttBZsMiamn4zEDHUNT-L8CsK4EoAwtbSSUjTs5YEj8")
 potInfo <- as.data.frame(gs_read(potInfo.gs, ws = 'Randomisation'))
 # get px/mm2 scael for each picture
-distance.xls <- read.xls('Data/Growth/distanceCalibration.xlsx')
-emptyPots <- read.table('Data/Growth/emptyPots.txt', head = T)
+distance.xls <- read.xls('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/FieldRNA/Data/Growth/distanceCalibration.xlsx')
+emptyPots <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/FieldRNA/Data/Growth/emptyPots.txt', head = T)
 ```
 emptyPots are pots that did not contain a plant on the respective date that the picture was taken as seen on the respective pictures.
 The empty pots resemble both pots left empty on purpose, plants that died, plants that were harvested.
@@ -52,8 +54,12 @@ marker <- 14.1
 
 
 ```{r Prepare data}
+# tray A4 in september has one correct and one incorrect image analysis
+# remove the image analysis with timestamp 14.05.2019 at 13:28:44 
+lemna.sep <- lemna.sep[lemna.sep$Analysis.Time.Stamp != "14.05.2019 13:28:44", ]
 # combine data
-lemna <- rbind(lemna.aug, lemna.sep)
+#lemna <- rbind(lemna.aug, lemna.sep, lemna.oct)
+lemna <- rbind(lemna.aug, lemna.sep, lemna.oct)
 lemna <- lemna[ ,c('ROI.Label', 'Snapshot.ID.Tag', 'ROI.Object.Sum.Area', 'Caliper.Length', 'Circumference', 'Compactness')]
 lemna$pot <- unlist(lapply(lemna$ROI.Label, function(ROI)
   {
@@ -75,14 +81,23 @@ lemna$ID <- paste(lemna$Snapshot.ID.Tag, lemna$pot, sep = '_')
 lemna$date <- unlist(lapply(lemna$Snapshot.ID.Tag, function(ID){strsplit(ID, split = '_')[[1]][2]}))
 lemna$month <- dates$month[match(lemna$date, dates$date)]
 
-# multiple ROI.objects. Take only first measurement and only ROI.Object.Sum.Area
+# multiple ROI.objects. Take only first measurement of non-zero measurements and only ROI.Object.Sum.Area
 objectCount <- table(lemna$ID)
 IDmulti <- names(objectCount[objectCount > 1])
 
 for (ID in IDmulti)
 {
   ID.objectCnt <- objectCount[ID]
+  # check  which ones are zero and remove, decide on plants left to make NA
+  #zeroNr <- nrow(lemna[lemna$ID == ID & lemna$ROI.Object.Sum.Area == 0, ])
+  #if (zeroNr == ID.objectCnt){print(paste('only zero measurement for', ID, 'will be removed through emptyPot removal')); next()}
+  # amount of plants that need to be removed apsart from zero area plants
+  #NAIDnr <- ID.objectCnt - zeroNr 
+  # remove additional ROI.objects
+  #if (NAIDnr > 1){lemna$ROI.Object.Sum.Area[lemna$ID == ID][2:ID.objectCnt] <- NA}
   lemna$ROI.Object.Sum.Area[lemna$ID == ID][2:ID.objectCnt] <- NA
+  # remove extra measurement with zero area
+  #if (zeroNr > 0){lemna$ROI.Object.Sum.Area[lemna$ID == ID & lemna$ROI.Object.Sum.Area == 0] <- NA}
 }
 # remove multiple ROI.objects
 lemna <- lemna[!is.na(lemna$ROI.Object.Sum.Area), ]
@@ -114,6 +129,8 @@ for (i in 1:nrow(distance.xls))
 
 # convert pixels to mm2
 lemna$AreaCm <- apply(lemna, MARGIN = 1, FUN = convertPxlToCm2, conversionRates = conversionRates)
+lemna$AreaMm <- lemna$AreaCm * 10
+lemna$logAreaMm <- log(lemna$AreaMm)
 ```
 
 Plants were harvested every month.
@@ -122,9 +139,9 @@ Remove positions that were empty in the taken pictures.
 ```{r remove empty pots}
 emptyPots$Pot <- unlist(lapply(emptyPots$Pot, function(pot)
 {
-  row <- substr(pot, 1,1)
+  row <- tolower(substr(pot, 1,1))
   col <- substr(pot, 2, nchar(pot))
-  col <- formatC(as.numeric(col), width = 2, flag = '0')
+  #col <- formatC(as.numeric(col), width = 2, flag = '0')
   return(paste(row, col, sep = ''))
 }))
 
@@ -133,33 +150,53 @@ for (i in 1:nrow(emptyPots))
   date <- emptyPots$Date[i]
   tray <- emptyPots$Tray[i]
   pot <- emptyPots$Pot[i]
-  lemna$pot[lemna$Tray == tray & lemna$date == date & lemna$pot == pot] <- NA
+  lemna$AreaCm[lemna$Tray == tray & lemna$date == date & lemna$pot == pot] <- NA
 }
-lemna <- lemna[!is.na(lemna$pot), ]
+lemna <- lemna[!is.na(lemna$AreaCm), ]
+
+# check for pots with zero values
+lemna$ID[lemna$AreaCm == 0]
 ```
+
 
 ```{r annotate accessions}
 lemna$accession <- potInfo$acn[match(lemna$position, potInfo$ID)]
 ```
 
-
-```{r correct for block effects}
+```{r plot area over time}
 # get timepoints as days
 lemna$days <- dates$days[match(lemna$date, dates$date)]
+plot(lemna$days, lemna$AreaMm, col = as.factor(lemna$accession))
+plot(lemna$days, lemna$logAreaMm, col = as.factor(lemna$accession))
+```
+
+
+
+```{r correct for block effects}
 
 # model with time as numeric
-lmm.time <- lme(AreaCm ~ accession*days, random = ~ 1 + days|block/position, data = lemna)
+lmm.time <- lme(logAreaMm ~ accession*days, random = ~ 1 + days|block/position, data = lemna)
 
 # model with time as factor (months)
-lmm.month <- lme(AreaCm ~ accession*month, random = ~ 1 + month|block/position, data = lemna)
+lmm.month <- lme(logAreaMm ~ accession*month, random = ~ 1 + month|block/position, data = lemna)
 # correct for heteroscedascity???
-
 ```
 
 ```{r estimated marginal means}
+adjM <- emmeans(lmm.month, ~ month * accession)
+s <- summary(adjM)
+emm <- data.frame('month' = s$month, 'accession' = s$accession, 'AreaCm' = s$emmean, 'SE' = s$SE, 'df' = s$df)
+```
+
+```{r boxplot log Area}
+
 
 ```
 
+
+```{r boxplot RGR}
+
+```
 
 
 

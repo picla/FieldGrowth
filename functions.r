@@ -3,9 +3,9 @@
 # Convert pixels to cm2, based on conversionRates
 convertPxlToCm2 <- function(lemnaRow, conversionRates = conversionRates)
 {
-  tray <- lemnaRow[8]
-  date <- lemnaRow[12]
-  ROI <- lemnaRow[1]
+  tray <- as.character(lemnaRow[8])
+  date <- as.character(lemnaRow[12])
+  ROI <- as.character(lemnaRow[1])
   Area <- as.numeric(lemnaRow[3])
   column <- as.numeric(substr(ROI, 2, nchar(ROI)))
   conversion <- conversionRates[conversionRates$Tray == tray & conversionRates$Date == date, ]
@@ -19,9 +19,9 @@ convertPxlToCm2 <- function(lemnaRow, conversionRates = conversionRates)
       endCol <- as.numeric(strsplit(col, ';')[[1]][2])
       return(seq(startCol, endCol))})
     # define which conversionNr the column is matching to
-    for (i in 1:length(ranges))
+    for (i in 1:length(columns))
     {
-      if (column %in% ranges[[i]]){conversionNr <- i}
+      if (column %in% columns[[i]]){conversionNr <- i}
     }
   }
   #else if (dim(conversion)[1] == 1){conversionNr <- 1}
