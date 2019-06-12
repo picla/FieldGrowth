@@ -15,6 +15,7 @@ library(googlesheets)
 library(gdata)
 library(nlme)
 library(emmeans)
+library(splines)
 source('functions.r')
 ```
 
