@@ -30,6 +30,13 @@ potInfo <- as.data.frame(gs_read(potInfo.gs, ws = 'Randomisation'))
 # get px/mm2 scael for each picture
 distance.xls <- read.xls('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/FieldRNA/Data/Growth/distanceCalibration.xlsx')
 emptyPots <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/FieldRNA/Data/Growth/emptyPots.txt', head = T)
+# get info on autumn temperature clusters
+autumnTempClust <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/QandD2/Results/Growth/meanAutumnTemperatureCLusters.txt', head = T)
+
+# relative growth rates of simulated Swedish autumn
+files <- list.files(path = '/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/QandD2/Data/Growth/GWAS', pattern = 'relGrowthRate_avg_[0-9]*C.csv', full.names = T)
+RGR.GC <- lapply(files, read.csv)
+names(RGR.GC) <- unlist(lapply(files, function(path){strsplit(path, "\\/|\\_|\\.")[[1]][15]}))
 ```
 emptyPots are pots that did not contain a plant on the respective date that the picture was taken as seen on the respective pictures.
 The empty pots resemble both pots left empty on purpose, plants that died, plants that were harvested.
@@ -48,11 +55,25 @@ dates$days <- unlist(lapply(dates$date, function(date)
     return(timepoint)
     }))
 
+accessions <- unique(potInfo$acn)
+accessions <- accessions[accessions != 'empty_pot']
+
+# accession visualisation
+acnVis <- data.frame('name' = accessions, 'acnColour' = rainbow(n = length(accessions), s = 1, v = 1))
+acnVis$accession <- unlist(lapply(acnVis$name, function(name){strsplit(name, '_')[[1]][1]}))
+# include colouring for local autumn temperature clusters
+autumnTempClustColours <- rainbow(6, s = 0.8, v = 1, start = 0.05, end = 0.78)
+autumnTempClust$tmeanAutumnClustTemp <- factor(autumnTempClust$tmeanAutumnClustTemp, levels = c('4C', '7C', '9C', '11C', '13C', '17C'), ordered = T)
+autumnTempClust$autumnTempCol <- autumnTempClustColours[autumnTempClust$tmeanAutumnClustTemp]
+acnVis$tmeanAutumnTempClustTemp <- autumnTempClust$tmeanAutumnClustTemp[match(acnVis$accession, autumnTempClust$acn)]
+acnVis$autumnTempCol <- autumnTempClust$autumnTempCol[match(acnVis$accession, autumnTempClust$acn)]
 # marker used as reference is 14.1cm
 marker <- 14.1
 ```
 
-
+##TODO
+change accesison into name where appropriate
+accession should change into accession ID everywhere
 ```{r Prepare data}
 # tray A4 in september has one correct and one incorrect image analysis
 # remove the image analysis with timestamp 14.05.2019 at 13:28:44 
@@ -179,6 +200,9 @@ Model with time as factor is much more heavy and does not give a better fit per 
 lmm.time <- lme(logAreaMm ~ days*accession, random = ~ 1 + days|block/position, data = lemna)
 #lmm.polyTime <- lme(logAreaMm ~ (days + I(days^2) + I(days^3))*accession, random = ~ 1 + days|block/position, data = lemna)
 #lmm.polyTime <- lme(logAreaMm ~ (days + I(days^2))*accession, random = ~ 1 + days|block/position, data = lemna)
+# settng lmeControl to 'old' optimastion algorithm prevents lme to run out of iterations.
+ctrl <- lmeControl(opt='optim')
+lmm.spline <- lme(logAreaMm ~ bs(days, degree= 1, knots = 22) * accession, random = ~ 1 + days|block/position, data = lemna, control = ctrl)
 
 # correct for heteroscedascity???
 ```
@@ -186,22 +210,132 @@ polynomial model requires one more timepoint than number of tested parameters.
 polynomial to the power 3 requires 4 timepoints. (Wait for november data).
 quadratic model does not converge.
 
+linear spline model has lower AIC (`{r AIC(lmm.spline)}`) compared to linear model withou spline (`{r AIC(lmm.time)}`)
+
 ```{r estimated marginal means}
-adjM <- emmeans(lmm.month, ~ month * accession)
+# create newdata for emm
+nrTimepoints <- 3
+predictionData <- data.frame('accession' = rep(accessions, nrTimepoints), 'days' = rep(dates$days[1:nrTimepoints], each = length(accessions)))
+
+adjM <- emmeans(lmm.spline, ~ days * accession, cov.reduce = F, data = predictionData)
 s <- summary(adjM)
-emm <- data.frame('month' = s$month, 'accession' = s$accession, 'AreaCm' = s$emmean, 'SE' = s$SE, 'df' = s$df)
+emm <- data.frame('days' = s$days, 'accession' = s$accession, 'logAreaMm' = s$emmean, 'SE' = s$SE, 'df' = s$df)
 ```
 
-```{r boxplot log Area}
+```{r plot log Area}
+minLogArea <- min(emm$logAreaMm)
+maxLogArea <- max(emm$logAreaMm)
+minDays <- min(emm$days)
+maxDays <- max(emm$days)
+plot(NA,NA, xlim = c(minDays, maxDays), ylim = c(minLogArea, maxLogArea), xaxt = 'n', xlab = '', ylab = "log(mm^2)")
+for (acn in accessions)
+{
+  emm.a <- emm[emm$accession == acn, ]
+  lines(emm.a$days, emm.a$logAreaMm, type = 'b', col = acnVis$autumnTempCol[acnVis$accession == strsplit(acn, '_')[[1]][1]])
+}
+# xaxis with months
+axis(side = 1, at = unique(emm$days), labels = dates$month[1:nrTimepoints])
+#legend('topleft', legend = acnVis$accession)
 
 
 ```
 
+```{r calculate RGR}
+RGR <- data.frame('accession' = character(), 'days' = numeric(), 'rgr' = numeric())
 
-```{r boxplot RGR}
+days <- unique(emm$days)
+for (i in 2:length(days))
+{
+  for (acn in accessions)
+  {
+    day1 <- days[i-1]
+    day2 <- days[i]
+    emm.time.acn <- emm[emm$days %in% c(day1, day2) & emm$accession == acn, ]
+    mod <- lm(logAreaMm ~ days, data = emm.time.acn)
+    rgr <- mod$coefficients[2]
+    period <- paste(dates$month[dates$days == day1], dates$month[dates$days == day2], sep = '_')
+
+    RGR.time.acn <- data.frame('accession' = acn, 'days' = mean(c(day1, day2)), 'period' = period, 'rgr' = rgr)
+    RGR <- rbind(RGR, RGR.time.acn)
+  }
+}
+```
+
+
+```{r plot RGR}
+minRGR <- min(RGR$rgr)
+maxRGR <- max(RGR$rgr)
+plot(NA,NA, xlim = c(minDays, maxDays), ylim = c(minRGR, maxRGR), xaxt = 'n', xlab = '', ylab = "relative growth rate")
+for (acn in accessions)
+{
+  RGR.a <- RGR[RGR$accession == acn, ]
+  lines(RGR.a$days, RGR.a$rgr, type = 'b', col = acnVis$autumnTempCol[acnVis$accession == strsplit(acn, '_')[[1]][1]])
+}
+# xaxis with months
+axis(side = 1, at = unique(emm$days), labels = dates$month[1:nrTimepoints])
+#legend('topleft', legend = acnVis$accession)
 
 ```
 
+## Correlate relative grotw rates with mean local autumn temperature
+```{r correlate}
+RGR$acn <- unlist(lapply(RGR$accession, function(x){strsplit(x, '_')[[1]][1]}))
+RGR$autumnTemp <- autumnTempClust$meanAutumn[match(RGR$acn, autumnTempClust$acn)]/10
+RGR$autumnTempCol <- acnVis$autumnTempCol[match(RGR$acn, acnVis$accession)]
+minAutumnTemp <- min(RGR$autumnTemp, na.rm = T)
+maxAutumnTemp <- max(RGR$autumnTemp, na.rm = T)
+
+#plot(NA,NA, xlim = c(minAutumnTemp, maxAutumnTemp), ylim = c(minRGR, maxRGR))
+for(period in unique(RGR$period))
+{
+  RGR.p <- RGR[RGR$period == period, ]
+  plot(RGR.p$autumnTemp, RGR.p$rgr, col = RGR.p$autumnTempCol, pch = 16, xlab = 'mean autumn temperature', ylab = 'relative growth rate', main = period)
+  abline(lm(RGR.p$rgr ~ RGR.p$autumnTemp))
+  cr <- cor.test(RGR.p$autumnTemp, RGR.p$rgr)
+}
+```
+
+
+
+
+
+## correlate growth chamber and field growth
+Correlate per temperature in growth chamber.
+
+```{r correlate growth chamber and field}
+# merge results from RGR in growth chamber formn different temperatures to RGR in field
+for(temp in names(RGR.GC))
+{
+  RGR.GC.C <- RGR.GC[[temp]]
+  #RGR <- cbind(RGR, RGR.GC.C$relgr[match(RGR$acn, RGR.GC.C$acn)])
+  RGR[, paste('rgr', temp, sep = '_')] <- RGR.GC.C$relgr[match(RGR$acn, RGR.GC.C$acn)]
+}
+
+for (period in unique(RGR$period))
+{
+  for (temp in names(RGR.GC))
+  {
+    RGR.p <- RGR[RGR$period == period, ]
+    plot(RGR.p$rgr, RGR.p[,paste('rgr', temp, sep = '_')], xlab = paste('field', period), ylab = paste('growth chamber', temp), main = 'relative growth rate', pch = 16)
+    abline(lm(RGR.p[,paste('rgr', temp, sep = '_')] ~ RGR.p$rgr))
+    ct <- cor.test(RGR.p$rgr, RGR.p[,paste('rgr', temp, sep = '_')])
+    text(x = par('usr')[1], y = par('usr')[4], paste('p: ', format.pval(ct$p.value, digits = 3, eps = 0.0001, nsmall = 4), sep = '' ), adj = c(-0.25 ,1.25))
+    text(x = par('usr')[1], y = par('usr')[4], paste('r: ', round(ct$estimate, 4), sep = '' ), adj = c(-0.275 ,2.75))
+  }
+  
+}
+
+```
+
+
+
+
+
+
+```{r make a map with phenotype colouring}
+
+
+```
 
 
 
