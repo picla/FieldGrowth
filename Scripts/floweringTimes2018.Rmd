@@ -1,0 +1,29 @@
+---
+title: "Flowering Times"
+author: "Pieter Clauw"
+date: "16/07/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(googlesheets)
+
+```
+
+Check which accessions were mostly flowering in the field site.
+These accessions will be replaced in the repeat experiment.
+
+```{r Data}
+field <- gs_url('https://docs.google.com/spreadsheets/d/11ttBZsMiamn4zEDHUNT-L8CsK4EoAwtbSSUjTs5YEj8/edit#gid=1745182587')
+plants <- as.data.frame(gs_read(ss = field, ws = 'Randomisation'))
+```
+
+
+```{r prepare}
+
+```
+
+
+
