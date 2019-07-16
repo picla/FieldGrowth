@@ -1,2 +1,2 @@
 # FieldGrowth
-Analysis of rosette areas measured in field conditions
+Planning and analysis of field experiments.
