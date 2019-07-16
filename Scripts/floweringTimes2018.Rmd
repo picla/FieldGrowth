@@ -22,8 +22,29 @@ plants <- as.data.frame(gs_read(ss = field, ws = 'Randomisation'))
 
 
 ```{r prepare}
+# remove Ilka's plants
+plants <- plants[!grepl('.{4}_Ilka', plants$acn), ]
 
+# take refernce plants apart
+plants <- plants[plants$acn != '6909_REF', ]
+
+# exclude plants that died
+plants <- plants[is.na(plants$died), ]
 ```
 
+```{r flowering plants per accession}
+# count number of flowering plants per accession per date
+plants.flower <- plants[!is.na(plants$flower), ]
+flowerCounts <- as.matrix(table(plants.flower$flower, plants.flower$acn))
+
+dates <- rownames(flowerCounts)
+# Grouped barplot
+barplot(flowerCounts, col=as.factor(dates) , border="white", font.axis=2, beside=T, legend=dates, xlab="group", font.lab=2)
+```
+
+
+## flowering accessions
+Accessions 6909, 9559 and 9917 need to be replaced as they were all flowering before winter.
+Also another accession needs to be used as reference.
 
 
