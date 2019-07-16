@@ -1,0 +1,53 @@
+---
+title: "Flowering Times"
+author: "Pieter Clauw"
+date: "16/07/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = F)
+library(googlesheets)
+
+```
+
+Check which accessions were mostly flowering in the field site.
+These accessions will be replaced in the repeat experiment.
+
+
+
+```{r Data}
+field <- gs_url('https://docs.google.com/spreadsheets/d/11ttBZsMiamn4zEDHUNT-L8CsK4EoAwtbSSUjTs5YEj8/edit#gid=1745182587')
+plants <- as.data.frame(gs_read(ss = field, ws = 'Randomisation'))
+```
+
+
+```{r prepare}
+# remove Ilka's plants
+plants <- plants[!grepl('.{4}_Ilka', plants$acn), ]
+
+# take refernce plants apart
+plants <- plants[plants$acn != '6909_REF', ]
+
+# exclude plants that died
+plants <- plants[is.na(plants$died), ]
+```
+
+```{r flowering plants per accession}
+# count number of flowering plants per accession per date
+plants.flower <- plants[!is.na(plants$flower), ]
+flowerCounts <- as.matrix(table(plants.flower$flower, plants.flower$acn))
+
+dates <- rownames(flowerCounts)
+# Grouped barplot
+barplot(flowerCounts, col=as.factor(dates) , border="white", font.axis=2, beside=T, legend=dates, xlab="group", font.lab=2)
+```
+
+
+## flowering accessions
+Accessions 6909, 9559 and 9917 need to be replaced as they were all flowering before winter.
+Also another accession needs to be used as reference.
+
+
+
