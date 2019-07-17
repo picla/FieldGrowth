@@ -12,16 +12,23 @@ library(googlesheets)
 
 ```
 
-Check which accessions were mostly flowering in the field site.
-These accessions will be replaced in the repeat experiment.
 
 
 
 ```{r Data}
 field <- gs_url('https://docs.google.com/spreadsheets/d/11ttBZsMiamn4zEDHUNT-L8CsK4EoAwtbSSUjTs5YEj8/edit#gid=1745182587')
 plants <- as.data.frame(gs_read(ss = field, ws = 'Randomisation'))
+
+selection2018 <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/FieldRNA/Setup/accessions_selected.txt', header = T)
+autumnTempClust <- read.table('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/QandD2/Results/Growth/meanAutumnTemperatureCLusters.txt', head = T)
+load('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/FloweringTime10_16_Arthur/filtered_ft10_ft16.rda')
+responseSlope <- read.csv('/Volumes/nordborg/user/pieter.clauw/Documents/Experiments/UltimateQandD/Data/Growth/GWAS/rep1/responseSlope_finalLogArea.csv', header = T)
 ```
 
+## check flowering accessions in 2018
+
+Check which accessions were mostly flowering in the field site.
+These accessions will be replaced in the repeat experiment.
 
 ```{r prepare}
 # remove Ilka's plants
@@ -45,9 +52,48 @@ barplot(flowerCounts, col=as.factor(dates) , border="white", font.axis=2, beside
 ```
 
 
-## flowering accessions
 Accessions 6909, 9559 and 9917 need to be replaced as they were all flowering before winter.
 Also another accession needs to be used as reference.
+
+## Selection 2019
+9917 needs to be replaced by a representative of it's cluster
+9559 was pre-selected as RNA-seq data was generated already in the growth chamber.
+Can be replaced by whoever.
+6909 was selected to have the Col-0 reference accession. Can be replaced by whoever.
+
+Replacements should not be early-flowering.
+Replacements are preferentially on the PacBio list.
+
+
+```{r}
+toReplace <- c(6909, 9559, 9917)
+
+lateFlowering <- Y_ft16$ecotypeid[Y_ft16$mean_ft16 > 60]
+
+# replace 9917
+clstr <- autumnTempClust$tmeanAutumnClustTemp[autumnTempClust$acn == 9917]
+## cluster member
+acns.clstr <- autumnTempClust$acn[autumnTempClust$tmeanAutumnClustTemp == clstr]
+## late flowering and not 9917
+acns.clstr.lateFT <- acns.clstr[!(acns.clstr %in% lateFlowering) & (acns.clstr != 9917)]
+## cluster representative
+clstrTempResponse <- median(responseSlope$alpha[responseSlope$acn %in% acns.clstr])
+deviations <- lapply(acns.clstr.lateFT, function(acn){
+  dev <- abs(responseSlope$alpha[responseSlope$acn == acn] - clstrTempResponse)
+  return(dev)
+})
+names(deviations) <- acns.clstr.lateFT
+minDev <- min(unlist(deviations))
+#find name with minDEv as responseSlope
+
+  clusterAcns$deviation <- abs(clusterAcns$TempResponse - median(clusterAcns$TempResponse))
+  
+  avgAcn <- clusterAcns$acn[clusterAcns$deviation == min(clusterAcns$deviation)]
+  clusterSelection <- c(clusterSelection, avgAcn) 
+
+```
+
+
 
 
 
